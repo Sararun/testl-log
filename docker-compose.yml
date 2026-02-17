@@ -1,0 +1,311 @@
+# =============================================================================
+# Laravel CRM + Observability Stack
+# =============================================================================
+#
+# Архитектура:
+#
+#   Laravel App (OTel PHP SDK)
+#     ├── traces (OTLP/HTTP) ──→ OTel Collector ──→ Jaeger
+#     ├── logs (JSON file)   ──→ Fluent Bit ──→ OpenSearch
+#     └── metrics (/metrics) ──→ Prometheus (scrape)
+#
+#   Grafana ──→ Jaeger + OpenSearch + Prometheus (datasources)
+#
+# Порты:
+#   80/443 - Laravel (php-fpm)
+#   3000   - Grafana UI
+#   16686  - Jaeger UI
+#   9090   - Prometheus UI
+#   5601   - OpenSearch Dashboards
+#   4318   - OTel Collector OTLP HTTP
+#   4317   - OTel Collector OTLP gRPC
+#   5432   - PostgreSQL
+#   9200   - OpenSearch API
+#
+# =============================================================================
+
+services:
+
+    # ===========================================================================
+    # APPLICATION
+    # ===========================================================================
+
+    php-fpm:
+        container_name: php-fpm
+        env_file:
+            - .env
+        build: ./containers/local/php-fpm
+        ports:
+            - "80:80"
+            - "443:443"
+        environment:
+            # OpenTelemetry — ДОЛЖНЫ быть системными env, не в .env Laravel.
+            # php-fpm читает их до загрузки фреймворка.
+            # Требует clear_env = no в www.conf (см. README).
+            - OTEL_PHP_AUTOLOAD_ENABLED=true
+            - OTEL_SERVICE_NAME=laravel-crm
+            - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+            - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+            - OTEL_TRACES_EXPORTER=otlp
+            - OTEL_METRICS_EXPORTER=none
+            - OTEL_LOGS_EXPORTER=none
+            - OTEL_PROPAGATORS=tracecontext,baggage
+            - OTEL_TRACES_SAMPLER=parentbased_traceidratio
+            - OTEL_TRACES_SAMPLER_ARG=1.0
+        volumes:
+            - ./:/var/www/html
+            - laravel-logs:/var/log/laravel
+        links:
+            - pgsql
+            - redis
+            - rabbitmq
+        depends_on:
+            - pgsql
+            - redis
+            - rabbitmq
+            - otel-collector
+        networks:
+            pim:
+                ipv4_address: 192.168.218.13
+            observability:
+
+    # ===========================================================================
+    # DATA STORES
+    # ===========================================================================
+
+    pgsql:
+        container_name: pgsql
+        env_file:
+            - .env
+        build:
+            context: .
+            dockerfile: ./containers/common/pgsql/Dockerfile
+        user: root
+        ports:
+            - "5432:5432"
+        volumes:
+            - pgsql_data:/var/lib/postgresql/data/
+        environment:
+            POSTGRES_DB: ${POSTGRES_DB}
+            POSTGRES_USER: ${POSTGRES_USER}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+        networks:
+            - pim
+
+    redis:
+        container_name: redis
+        env_file:
+            - .env
+        image: redis:7.4-alpine3.20
+        environment:
+            ALLOW_EMPTY_PASSWORD: ${REDIS_ALLOW_EMPTY_PASSWORD}
+        volumes:
+            - redis_data:/data
+        networks:
+            - pim
+
+    rabbitmq:
+        container_name: rabbitmq
+        env_file:
+            - .env
+        build:
+            context: .
+            dockerfile: ./containers/common/rabbitmq/Dockerfile
+        user: root
+        volumes:
+            - rabbitmq_data:/var/lib/rabbitmq/
+        environment:
+            TZ: ${RABBITMQ_TZ}
+            RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+            RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+            RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_DEFAULT_VHOST}
+        networks:
+            pim:
+                ipv4_address: 192.168.218.20
+
+    # ===========================================================================
+    # TRACES PIPELINE
+    # ===========================================================================
+
+    otel-collector:
+        image: otel/opentelemetry-collector-contrib:0.118.0
+        container_name: otel-collector
+        restart: unless-stopped
+        command: ["--config=/etc/otel-collector/config.yaml"]
+        volumes:
+            - ./config/otel-collector/config.yaml:/etc/otel-collector/config.yaml:ro
+        ports:
+            - "4317:4317"
+            - "4318:4318"
+            - "8888:8888"
+        depends_on:
+            jaeger:
+                condition: service_started
+        networks:
+            - observability
+
+    jaeger:
+        image: jaegertracing/jaeger:2.6.0
+        container_name: jaeger
+        restart: unless-stopped
+        ports:
+            - "16686:16686"
+            - "4327:4317"
+            - "4328:4318"
+        environment:
+            - MEMORY_MAX_TRACES=50000
+        networks:
+            - observability
+
+    # ===========================================================================
+    # LOGS PIPELINE
+    # ===========================================================================
+
+    opensearch:
+        image: opensearchproject/opensearch:2.19.1
+        container_name: opensearch
+        restart: unless-stopped
+        environment:
+            - cluster.name=observability
+            - node.name=opensearch-node1
+            - discovery.type=single-node
+            - bootstrap.memory_lock=true
+            - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+            - DISABLE_SECURITY_PLUGIN=true
+            - DISABLE_INSTALL_DEMO_CONFIG=true
+        ulimits:
+            memlock:
+                soft: -1
+                hard: -1
+            nofile:
+                soft: 65536
+                hard: 65536
+        volumes:
+            - opensearch-data:/usr/share/opensearch/data
+        ports:
+            - "9200:9200"
+        networks:
+            - observability
+        healthcheck:
+            test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+            interval: 15s
+            timeout: 10s
+            retries: 10
+            start_period: 30s
+
+    opensearch-dashboards:
+        image: opensearchproject/opensearch-dashboards:2.19.1
+        container_name: opensearch-dashboards
+        restart: unless-stopped
+        environment:
+            - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+            - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+        ports:
+            - "5601:5601"
+        depends_on:
+            opensearch:
+                condition: service_healthy
+        networks:
+            - observability
+
+    fluent-bit:
+        image: fluent/fluent-bit:3.2
+        container_name: fluent-bit
+        restart: unless-stopped
+        volumes:
+            - ./config/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+            - ./config/fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+            - laravel-logs:/var/log/laravel:ro
+            - fluent-bit-db:/fluent-bit/db
+        depends_on:
+            opensearch:
+                condition: service_healthy
+        networks:
+            - observability
+
+    # ===========================================================================
+    # METRICS PIPELINE
+    # ===========================================================================
+
+    prometheus:
+        image: prom/prometheus:v3.2.1
+        container_name: prometheus
+        restart: unless-stopped
+        command:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--storage.tsdb.retention.time=30d"
+            - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+            - "--web.console.templates=/usr/share/prometheus/consoles"
+            - "--web.enable-lifecycle"
+        volumes:
+            - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+            - prometheus-data:/prometheus
+        ports:
+            - "9090:9090"
+        networks:
+            - observability
+
+    # ===========================================================================
+    # VISUALIZATION
+    # ===========================================================================
+
+    grafana:
+        image: grafana/grafana-oss:11.5.2
+        container_name: grafana
+        restart: unless-stopped
+        environment:
+            - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+            - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+            - GF_INSTALL_PLUGINS=grafana-opensearch-datasource
+            - GF_AUTH_ANONYMOUS_ENABLED=true
+            - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+        volumes:
+            - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+            - grafana-data:/var/lib/grafana
+        ports:
+            - "3000:3000"
+        depends_on:
+            - prometheus
+            - jaeger
+            - opensearch
+        networks:
+            - observability
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
+
+volumes:
+    pgsql_data:
+        driver: local
+    redis_data:
+        driver: local
+    rabbitmq_data:
+        driver: local
+    opensearch-data:
+        driver: local
+    prometheus-data:
+        driver: local
+    grafana-data:
+        driver: local
+    laravel-logs:
+        driver: local
+    fluent-bit-db:
+        driver: local
+
+# =============================================================================
+# NETWORKS
+# =============================================================================
+
+networks:
+    pim:
+        driver: bridge
+        enable_ipv6: false
+        ipam:
+            driver: default
+            config:
+                - subnet: 192.168.218.0/24
+    observability:
+        driver: bridge
+        name: observability

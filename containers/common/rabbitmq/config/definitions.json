@@ -1,0 +1,54 @@
+{
+    "users": [
+        {
+            "name": "pim",
+            "password_hash": "U/n7d76YLAbtqAjQrbGN0nzG69jrjdKVtOBQxhrh+6288pcH",
+            "hashing_algorithm": "rabbit_password_hashing_sha256",
+            "tags": "administrator"
+        }
+    ],
+    "vhosts": [
+        {
+            "name": "pim"
+        }
+    ],
+    "permissions": [
+        {
+            "user": "pim",
+            "vhost": "pim",
+            "configure": ".*",
+            "read": ".*",
+            "write": ".*"
+        }
+    ],
+    "exchanges": [
+        {
+            "name": "pim",
+            "vhost": "pim",
+            "type": "fanout",
+            "durable": true,
+            "auto_delete": false,
+            "internal": false,
+            "arguments": {}
+        }
+    ],
+    "queues": [
+        {
+            "name": "pim",
+            "vhost": "pim",
+            "durable": true,
+            "auto_delete": false,
+            "arguments": {}
+        }
+    ],
+    "bindings": [
+        {
+            "source": "pim",
+            "vhost": "pim",
+            "destination": "pim",
+            "destination_type": "queue",
+            "routing_key": "*",
+            "arguments": {}
+        }
+    ]
+}

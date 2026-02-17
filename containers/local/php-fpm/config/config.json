@@ -1,0 +1,62 @@
+{
+  "settings": {
+    "http": {
+      "max_body_size": 52428800
+    }
+  },
+
+  "listeners": {
+    "*:80": {
+      "pass": "routes"
+    }
+  },
+
+  "routes": [
+      {
+          "match": {
+              "host": "rabbitmq.pim.local"
+          },
+          "action": {
+              "proxy": "http://192.168.218.20:15672"
+          }
+      },
+      {
+          "match": {
+              "host": "pim.local",
+              "uri": "!/index.php"
+          },
+          "action": {
+              "share": "/var/www/html/public$uri",
+              "fallback": {
+                  "pass": "applications/anta-pim"
+              }
+          }
+      }
+  ],
+  "applications": {
+      "anta-pim": {
+          "root": "/var/www/html/public",
+          "script": "index.php",
+          "index": "index.php",
+          "type": "php 8.4",
+          "limits": {
+              "requests": 1000,
+              "timeout": 600
+          },
+          "processes": {
+              "max": 16,
+              "spare": 2,
+              "idle_timeout": 60
+          },
+          "user": "laravel",
+          "group": "laravel",
+          "options": {
+              "file": "/usr/local/etc/php/conf.d/laravel.ini"
+          }
+      }
+  },
+  "access_log": {
+    "path": "/dev/stdout",
+    "format": "$remote_addr - - [$time_local] \"$request_line\" $status $body_bytes_sent \"$header_referer\" \"$header_user_agent\" x-request-id \"$header_x_request_id\" traceparent \"$header_traceparent\" time $request_time"
+  }
+}
