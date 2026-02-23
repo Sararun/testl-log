@@ -11,7 +11,7 @@ processors:
       when:
         not:
           contains:
-            container.name: "nginx-unit"
+            container.name: "php-fpm"
 
   - decode_json_fields:
       fields: ["message"]

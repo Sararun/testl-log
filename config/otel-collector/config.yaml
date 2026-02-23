@@ -1,0 +1,94 @@
+# =============================================================================
+# OpenTelemetry Collector Configuration
+# =============================================================================
+#
+# Роль: принимает трейсы от Laravel (OTLP), обрабатывает, отправляет в Jaeger.
+#
+# Pipeline:
+#   Laravel (OTLP/HTTP :4318) → [receiver] → [processors] → [exporter] → Jaeger
+#
+# =============================================================================
+
+receivers:
+  # OTLP receiver — стандартный протокол OpenTelemetry.
+  # Laravel OTel PHP SDK отправляет данные сюда.
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Batch processor — группирует спаны перед отправкой.
+  # Снижает количество HTTP-запросов к Jaeger.
+  # Отправляет батч каждые 5 секунд или при накоплении 512 спанов.
+  batch:
+    send_batch_size: 512
+    timeout: 5s
+    send_batch_max_size: 1024
+
+  # Memory limiter — защита от OOM.
+  # Если Collector потребляет >75% лимита, начинает дропать данные.
+  # Лучше потерять часть трейсов, чем уронить весь стек.
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 256
+    spike_limit_mib: 64
+
+  # Resource processor — добавляет метаданные ко всем трейсам.
+  # Полезно для фильтрации в Jaeger/Grafana.
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: "development"
+        action: upsert
+
+exporters:
+  # OTLP exporter → Jaeger.
+  # Jaeger v2 нативно принимает OTLP на порту 4317.
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 1000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 120s
+
+  # Debug exporter — пишет трейсы в stdout Collector (для отладки).
+  # В продакшне убрать или переключить verbosity: basic.
+  debug:
+    verbosity: basic
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+  # Собственные метрики Collector для Prometheus.
+  # Prometheus скрейпит :8888/metrics
+  # Метрики: количество принятых/экспортированных спанов, ошибки, размер очередей.
+
+service:
+  extensions: [health_check]
+
+  pipelines:
+    # Traces pipeline: Laravel → OTel Collector → Jaeger
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [otlp/jaeger, debug]
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      address: 0.0.0.0:8888
+      level: detailed

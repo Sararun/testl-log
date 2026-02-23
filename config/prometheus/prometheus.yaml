@@ -1,0 +1,63 @@
+# =============================================================================
+# Prometheus Configuration
+# =============================================================================
+#
+# Prometheus работает по pull-модели: сам ходит к targets и забирает метрики.
+# Это надёжнее push-модели (если Prometheus упал — данные не теряются,
+# просто будет пробел, и он продолжит собирать после восстановления).
+#
+# =============================================================================
+
+global:
+  # Как часто собирать метрики. 15s — стандарт для продакшна.
+  # 5s даёт больше детализации, но увеличивает объём данных.
+  scrape_interval: 15s
+  # Timeout для каждого scrape.
+  scrape_timeout: 10s
+  # Как часто вычислять recording rules.
+  evaluation_interval: 15s
+
+# =============================================================================
+# Scrape configs — откуда собирать метрики
+# =============================================================================
+
+scrape_configs:
+
+  # --- OTel Collector метрики ---
+  # Собственные метрики Collector:
+  #   otelcol_receiver_accepted_spans — принятые спаны
+  #   otelcol_receiver_refused_spans — отклонённые спаны
+  #   otelcol_exporter_sent_spans — отправленные в Jaeger спаны
+  #   otelcol_exporter_send_failed_spans — ошибки отправки
+  #   otelcol_processor_batch_batch_send_size — размер батча
+  - job_name: "otel-collector"
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["otel-collector:8888"]
+        labels:
+          service: "otel-collector"
+
+  # --- Prometheus self-monitoring ---
+  - job_name: "prometheus"
+    scrape_interval: 30s
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # --- Laravel приложение (если используете promphp/prometheus_client_php) ---
+  # Раскомментируйте после настройки /metrics endpoint в Laravel.
+  # Подробная инструкция в README.md, раздел "Метрики приложения".
+  #
+  # - job_name: "laravel-crm"
+  #   scrape_interval: 15s
+  #   metrics_path: "/metrics"
+  #   static_configs:
+  #     - targets: ["laravel-app:8080"]
+  #       labels:
+  #         service: "laravel-crm"
+  #         environment: "development"
+
+  # --- Grafana метрики ---
+  - job_name: "grafana"
+    scrape_interval: 30s
+    static_configs:
+      - targets: ["grafana:3000"]

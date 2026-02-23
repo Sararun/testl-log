@@ -1,0 +1,67 @@
+# =============================================================================
+# Grafana Datasources Provisioning
+# =============================================================================
+#
+# Автоматически подключает все три бэкенда при первом запуске Grafana.
+# Не нужно настраивать вручную через UI.
+#
+# =============================================================================
+
+apiVersion: 1
+
+datasources:
+
+  # --- Jaeger (трейсы) ---
+  - name: Jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    isDefault: false
+    editable: true
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: opensearch-logs
+        spanStartTimeShift: "-1h"
+        spanEndTimeShift: "1h"
+        filterByTraceID: false
+        filterBySpanID: false
+        customQuery: true
+        # Запрос для перехода от трейса к логам.
+        # Ищет логи с тем же trace_id в OpenSearch.
+        query: "trace_id:${__span.traceId}"
+      tracesToMetrics:
+        datasourceUid: prometheus
+        spanStartTimeShift: "-5m"
+        spanEndTimeShift: "5m"
+      nodeGraph:
+        enabled: true
+
+  # --- OpenSearch (логи) ---
+  - name: OpenSearch Logs
+    type: grafana-opensearch-datasource
+    uid: opensearch-logs
+    access: proxy
+    url: http://opensearch:9200
+    isDefault: false
+    editable: true
+    jsonData:
+      database: "laravel-logs-*"
+      flavor: opensearch
+      version: "2.19.1"
+      timeField: "@timestamp"
+      logMessageField: "message"
+      logLevelField: "level"
+      pplEnabled: true
+
+  # --- Prometheus (метрики) ---
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: "15s"
+      queryTimeout: "30s"
+      httpMethod: POST

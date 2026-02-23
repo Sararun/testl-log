@@ -48,9 +48,6 @@ RUN docker-php-ext-install zip exif pcntl opcache sockets \
     && docker-php-ext-configure intl \
     && docker-php-ext-install intl
 
-# Install xdebug
-RUN pecl install xdebug && \
-    docker-php-ext-enable xdebug
 RUN pecl install redis && \
     docker-php-ext-enable redis
 
@@ -73,7 +70,7 @@ COPY ./php/*.ini /usr/local/etc/php/conf.d/
 COPY ./php/opentelemetry.ini /usr/local/etc/php/conf.d/99-opentelemetry.ini
 
 # php-fpm pool configuration
-COPY ./php-fpm/www.conf /usr/local/etc/php-fpm.d/www.conf
+COPY ./php/www.conf /usr/local/etc/php-fpm.d/www.conf
 
 ENV TZ=Europe/Moscow
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
