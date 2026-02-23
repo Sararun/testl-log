@@ -127,10 +127,13 @@ return [
             'path' => storage_path('logs/laravel.log'),
         ],
         'observability' => [
-            'driver' => 'single',
-            'path' => '/var/log/laravel/laravel.log',
-            'level' => env('LOG_LEVEL', 'debug'),
-            'tap' => [\App\Logging\ObservabilityFormatter::class],
+            'driver'  => 'monolog',
+            'handler' => StreamHandler::class,
+            'with' => [
+                'stream' => 'php://stderr',
+            ],
+            'level'   => env('LOG_LEVEL', 'info'),
+            'tap'     => [\App\Logging\ObservabilityFormatter::class],
         ],
     ],
 
