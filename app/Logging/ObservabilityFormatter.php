@@ -4,7 +4,7 @@ namespace App\Logging;
 
 use Illuminate\Log\Logger;
 use Monolog\Formatter\JsonFormatter;
-use Psr\Log\LoggerInterface;
+
 
 /**
  * ObservabilityFormatter — форматирует логи для Fluent Bit → OpenSearch pipeline.
@@ -26,7 +26,12 @@ readonly class ObservabilityFormatter
     ) {
     }
 
-    public function __invoke(LoggerInterface $logger): void
+
+    /**
+     * @param \Monolog\Logger $logger
+     * @return void
+     */
+    public function __invoke( mixed $logger): void
     {
         foreach ($logger->getHandlers() as $handler) {
 

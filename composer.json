@@ -6,16 +6,18 @@
     "keywords": ["laravel", "framework"],
     "license": "MIT",
     "require": {
-        "php": "^8.2",
+        "php": "^8.4",
         "laravel/framework": "^12.0",
         "laravel/tinker": "^2.10.1",
+        "mismatch/opentelemetry-auto-redis": "^0.3.0",
         "open-telemetry/exporter-otlp": "^1.4",
         "open-telemetry/opentelemetry-auto-guzzle": "^1.2",
         "open-telemetry/opentelemetry-auto-laravel": "^1.4",
         "open-telemetry/opentelemetry-auto-psr18": "^1.1",
         "open-telemetry/sdk": "^1.13",
         "predis/predis": "^3.4",
-        "vladimir-yuldashev/laravel-queue-rabbitmq": "^14.4"
+        "vladimir-yuldashev/laravel-queue-rabbitmq": "^14.4",
+        "ext-opentelemetry": "*"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

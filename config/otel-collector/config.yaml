@@ -2,16 +2,22 @@
 # OpenTelemetry Collector Configuration
 # =============================================================================
 #
-# Роль: принимает трейсы от Laravel (OTLP), обрабатывает, отправляет в Jaeger.
+# Роль: принимает трейсы от Laravel (OTLP), применяет tail-based sampling,
+#       отправляет в Jaeger.
 #
 # Pipeline:
 #   Laravel (OTLP/HTTP :4318) → [receiver] → [processors] → [exporter] → Jaeger
 #
+# Tail-based sampling (решение принимается после получения ВСЕГО трейса):
+#   - ERROR статус (span status=ERROR)  → 100%  — HTTP + CLI + queue, универсально
+#   - Медленные трейсы (>2s)            → 100%  — HTTP + CLI + queue, универсально
+#   - HTTP 4xx                          → 20%
+#   - HTTP 2xx                          → 5%
+#   - CLI, queues (без http статуса)    → 2%    — baseline, через OTTL
+#
 # =============================================================================
 
 receivers:
-  # OTLP receiver — стандартный протокол OpenTelemetry.
-  # Laravel OTel PHP SDK отправляет данные сюда.
   otlp:
     protocols:
       grpc:
@@ -20,33 +26,98 @@ receivers:
         endpoint: 0.0.0.0:4318
 
 processors:
-  # Batch processor — группирует спаны перед отправкой.
-  # Снижает количество HTTP-запросов к Jaeger.
-  # Отправляет батч каждые 5 секунд или при накоплении 512 спанов.
-  batch:
-    send_batch_size: 512
-    timeout: 5s
-    send_batch_max_size: 1024
-
   # Memory limiter — защита от OOM.
   # Если Collector потребляет >75% лимита, начинает дропать данные.
-  # Лучше потерять часть трейсов, чем уронить весь стек.
   memory_limiter:
     check_interval: 5s
     limit_mib: 256
     spike_limit_mib: 64
 
   # Resource processor — добавляет метаданные ко всем трейсам.
-  # Полезно для фильтрации в Jaeger/Grafana.
   resource:
     attributes:
       - key: deployment.environment
         value: "development"
         action: upsert
 
+  # Tail-based sampling — ждёт все спаны трейса, затем принимает решение.
+  # decision_wait: сколько ждать последнего спана трейса перед решением.
+  # num_traces: сколько трейсов держать в памяти одновременно.
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 50000
+    expected_new_traces_per_sec: 50
+    policies:
+      # 100% трейсов с ошибками.
+      # Проверяет OTel span status (не http атрибут) — универсально для HTTP, CLI, queue.
+      - name: errors-policy
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+
+      # 100% медленных трейсов (>2s) — тоже универсально, без зависимости от протокола.
+      - name: slow-traces-policy
+        type: latency
+        latency:
+          threshold_ms: 2000
+
+      # 20% трейсов с HTTP 4xx
+      - name: warning-4xx-policy
+        type: and
+        and:
+          and_sub_policy:
+            - name: is-4xx
+              type: numeric_attribute
+              numeric_attribute:
+                key: http.response.status_code
+                min_value: 400
+                max_value: 499
+            - name: sample-20pct
+              type: probabilistic
+              probabilistic:
+                sampling_percentage: 20
+
+      # 5% успешных HTTP 2xx трейсов
+      - name: success-2xx-policy
+        type: and
+        and:
+          and_sub_policy:
+            - name: is-2xx
+              type: numeric_attribute
+              numeric_attribute:
+                key: http.response.status_code
+                min_value: 200
+                max_value: 299
+            - name: sample-5pct
+              type: probabilistic
+              probabilistic:
+                sampling_percentage: 5
+
+      # 2% baseline для CLI, queue и всего без http.response.status_code.
+      # ottl_condition проверяет отсутствие атрибута — не зависит от протокола.
+      - name: non-http-baseline-policy
+        type: and
+        and:
+          and_sub_policy:
+            - name: no-http-status
+              type: ottl_condition
+              ottl_condition:
+                error_mode: ignore
+                span:
+                  - 'attributes["http.response.status_code"] == nil'
+            - name: baseline-2pct
+              type: probabilistic
+              probabilistic:
+                sampling_percentage: 2
+
+  # Batch processor — группирует спаны перед отправкой.
+  # Идёт ПОСЛЕ tail_sampling, чтобы батчевать уже отобранные трейсы.
+  batch:
+    send_batch_size: 512
+    timeout: 5s
+    send_batch_max_size: 1024
+
 exporters:
-  # OTLP exporter → Jaeger.
-  # Jaeger v2 нативно принимает OTLP на порту 4317.
   otlp/jaeger:
     endpoint: jaeger:4317
     tls:
@@ -61,8 +132,6 @@ exporters:
       max_interval: 30s
       max_elapsed_time: 120s
 
-  # Debug exporter — пишет трейсы в stdout Collector (для отладки).
-  # В продакшне убрать или переключить verbosity: basic.
   debug:
     verbosity: basic
     sampling_initial: 5
@@ -72,18 +141,13 @@ extensions:
   health_check:
     endpoint: 0.0.0.0:13133
 
-  # Собственные метрики Collector для Prometheus.
-  # Prometheus скрейпит :8888/metrics
-  # Метрики: количество принятых/экспортированных спанов, ошибки, размер очередей.
-
 service:
   extensions: [health_check]
 
   pipelines:
-    # Traces pipeline: Laravel → OTel Collector → Jaeger
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, batch, resource]
+      processors: [memory_limiter, resource, tail_sampling, batch]
       exporters: [otlp/jaeger, debug]
 
   telemetry:

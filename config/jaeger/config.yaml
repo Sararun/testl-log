@@ -1,0 +1,56 @@
+# =============================================================================
+# Jaeger v2 Configuration
+# =============================================================================
+#
+# Хранилище: OpenSearch (персистентное, заменяет in-memory).
+# Jaeger получает трейсы от OTel Collector по OTLP gRPC.
+# UI доступен на :16686.
+#
+# =============================================================================
+
+service:
+  extensions: [jaeger_storage, jaeger_query, healthcheckv2]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [jaeger_storage_exporter]
+
+extensions:
+  healthcheckv2:
+    use_v2: true
+    http:
+      endpoint: 0.0.0.0:13133
+
+  jaeger_storage:
+    backends:
+      main_store:
+        opensearch:
+          server_urls:
+            - http://opensearch:9200
+          indices:
+            index_prefix: jaeger
+            spans:
+              date_layout: "2006-01-02"
+            services:
+              date_layout: "2006-01-02"
+          log_level: error
+
+  jaeger_query:
+    storage:
+      traces: main_store
+    http:
+      endpoint: 0.0.0.0:16686
+    grpc:
+      endpoint: 0.0.0.0:16685
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  jaeger_storage_exporter:
+    trace_storage: main_store

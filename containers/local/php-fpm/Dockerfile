@@ -33,13 +33,14 @@ RUN apt-get update && apt-get install -y \
     libxpm-dev \
     libmcrypt-dev \
     libpq-dev \
+    libffi-dev \
     supervisor \
     htop \
     && apt clean  \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/doc/* /var/www/html/*
 
 # Install extensions
-RUN docker-php-ext-install zip exif pcntl opcache sockets \
+RUN docker-php-ext-install zip exif pcntl opcache sockets ffi \
     && docker-php-ext-install -j$(nproc) iconv mbstring mysqli pdo_mysql \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j$(nproc) gd \
@@ -54,7 +55,6 @@ RUN pecl install redis && \
 # OpenTelemetry PHP Extension
 RUN pecl install opentelemetry && \
     docker-php-ext-enable opentelemetry
-RUN php -m | grep opentelemetry && echo "✓ OTel extension loaded"
 
 # ---- COMPOSER ----
 COPY --from=composer:2.9.5 /usr/bin/composer /usr/local/bin/composer

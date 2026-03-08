@@ -59,8 +59,17 @@ services:
             - OTEL_METRICS_EXPORTER=none
             - OTEL_LOGS_EXPORTER=none
             - OTEL_PROPAGATORS=tracecontext,baggage
-            - OTEL_TRACES_SAMPLER=parentbased_traceidratio
-            - OTEL_TRACES_SAMPLER_ARG=1.0
+            # Tail-based sampling: все трейсы отправляем в коллектор,
+            # решение о сохранении принимает OTel Collector.
+            - OTEL_TRACES_SAMPLER=always_on
+            # Асинхронный экспорт через PHP Fibers — не блокирует FPM воркер.
+            - OTEL_PHP_FIBERS_ENABLED=true
+            # Короткие таймауты: лучше потерять трейс, чем тормозить запрос.
+            - OTEL_BSP_SCHEDULE_DELAY=5000
+            - OTEL_BSP_MAX_QUEUE_SIZE=2048
+            - OTEL_BSP_MAX_EXPORT_BATCH_SIZE=512
+            - OTEL_BSP_EXPORT_TIMEOUT=2000
+            - OTEL_EXPORTER_OTLP_TIMEOUT=1000
             - XDEBUG_MODE=off
         volumes:
             - ./:/var/www/html
@@ -173,12 +182,14 @@ services:
         image: jaegertracing/jaeger:2.6.0
         container_name: jaeger
         restart: unless-stopped
+        command: ["--config=/etc/jaeger/config.yaml"]
         ports:
             - "16686:16686"
-            - "4327:4317"
-            - "4328:4318"
-        environment:
-            - MEMORY_MAX_TRACES=50000
+        volumes:
+            - ./config/jaeger/config.yaml:/etc/jaeger/config.yaml:ro
+        depends_on:
+            opensearch:
+                condition: service_healthy
         logging: *fluentd-logging
         networks:
             - observability
@@ -253,6 +264,21 @@ services:
         networks:
             - observability
 
+    # Применяет ISM политики retention после старта OpenSearch.
+    # Завершается после выполнения — не держит постоянный процесс.
+    opensearch-init:
+        image: curlimages/curl:8.6.0
+        container_name: opensearch-init
+        restart: "no"
+        environment:
+            - OPENSEARCH_URL=http://opensearch:9200
+        volumes:
+            - ./config/opensearch/ism-init.sh:/ism-init.sh:ro
+        entrypoint: ["sh", "/ism-init.sh"]
+        depends_on:
+            opensearch:
+                condition: service_healthy
+
     # ===========================================================================
     # METRICS PIPELINE
     # ===========================================================================
@@ -285,12 +311,17 @@ services:
         image: grafana/grafana-oss:11.5.2
         container_name: grafana
         restart: unless-stopped
+        env_file:
+            .env
         environment:
             - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
             - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
             - GF_INSTALL_PLUGINS=grafana-opensearch-datasource
             - GF_AUTH_ANONYMOUS_ENABLED=true
             - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+            - GF_UNIFIED_ALERTING_ENABLED=true
+            - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+            - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
         volumes:
             - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
             - grafana-data:/var/lib/grafana

@@ -3,6 +3,9 @@ apiVersion: 1
 datasources:
 
   # --- Jaeger (traces) ---
+  # tracesToLogsV2: при клике на трейс в Jaeger → переход к логам в OpenSearch.
+  # Lua-фильтр в Fluent Bit промоутит trace_id на корневой уровень,
+  # поэтому query простой: trace_id:xxx (не context.trace_id).
   - name: Jaeger
     type: jaeger
     access: proxy
@@ -16,9 +19,15 @@ datasources:
         filterByTraceID: false
         filterBySpanID: false
         customQuery: true
-        query: "trace_id:${__span.traceId}"
+        query: "context.trace_id:${__span.traceId} AND log_type:app"
 
-  # --- OpenSearch (единый логовый источник) ---
+  # --- OpenSearch (единый логовый индекс) ---
+  # Один индекс logs-*, один datasource.
+  # Фильтрация по полям:
+  #   log_type:app   — Laravel логи
+  #   log_type:infra — FPM, nginx, postgres, redis...
+  #   container_name:php-fpm — конкретный контейнер
+  #   trace_id:abc123 — корреляция с Jaeger
   - name: OpenSearch Logs
     type: grafana-opensearch-datasource
     uid: opensearch
@@ -30,8 +39,8 @@ datasources:
       version: "2.19.1"
       timeField: "@timestamp"
       logMessageField: "message"
-      logLevelField: "level"
-      pplEnabled: true
+      logLevelField: "level_name.keyword"
+      pplEnabled: false
 
   # --- Prometheus ---
   - name: Prometheus
