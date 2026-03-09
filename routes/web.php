@@ -9,7 +9,10 @@ Route::get('/', function () {
     $str = \Illuminate\Support\Str::uuid7()->toString();
     $bytes = random_int(1,8823);
     \Illuminate\Support\Facades\Cache::put($str, "$bytes");
-    \Illuminate\Support\Facades\Log::info('create user');
+    \Illuminate\Support\Facades\Log::info('create user', [
+        'context' => 'new context'
+    ]);
+    throw new LogicException('Абра кадабра');
     $users = \App\Models\User::factory()->createMany(10);
     DoJob::dispatch($users);
     return new \Illuminate\Http\JsonResponse();
