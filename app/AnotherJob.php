@@ -9,7 +9,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 
-class DoJob implements ShouldQueue
+class AnotherJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -20,6 +20,6 @@ class DoJob implements ShouldQueue
     public function handle(): void
     {
         User::factory()->createMany(10);
-        AnotherJob::dispatch()->onQueue('pim')->delay(now()->addMinutes(10));
+
     }
 }

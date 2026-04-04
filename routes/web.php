@@ -12,9 +12,8 @@ Route::get('/', function () {
     \Illuminate\Support\Facades\Log::info('create user', [
         'context' => 'new context'
     ]);
-    throw new LogicException('Абра кадабра');
     $users = \App\Models\User::factory()->createMany(10);
-    DoJob::dispatch($users);
+    DoJob::dispatch()->onQueue('pim');
     return new \Illuminate\Http\JsonResponse();
 });
 

@@ -83,4 +83,4 @@ RUN mkdir -p /var/log/laravel \
 COPY ./supervisor/config.conf /etc/supervisor/supervisord.conf
 
 EXPOSE 9000
-CMD ["php-fpm"]
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
